@@ -1,1 +1,1 @@
-ApplicationController.class_eval{ helper ViewBuilders::Helpers::ListHtmlHelper }
+ActionController::Base.class_eval{ helper ViewBuilders::Helpers::ListHtmlHelper }
