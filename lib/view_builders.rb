@@ -3,26 +3,35 @@ module ViewBuilders
 		def list_html(*args, &proc)
 			options = args.extract_options!
 
-			builder_class = options[:builder] || ViewBuilders::Base.default_list_builder
+			builder_class = options.delete(:builder) || ViewBuilders::Base.default_list_builder
 			builder = builder_class.new(self)
-			builder.list(&proc)
+			builder.list(options, &proc)
 		end
 
 		def show_html(*args, &proc)
 			options = args.extract_options!
 
-			builder_class = options[:builder] || ViewBuilders::Base.default_show_builder
-			builder = builder_class.new(nil, self)
+			builder_class = options.delete(:builder) || ViewBuilders::Base.default_show_builder
+			builder = builder_class.new(nil, self, options)
 			builder.show(&proc)
 		end
 
 		def show_for(object, *args, &proc)
 			options = args.extract_options!
 
-			builder_class = options[:builder] || ViewBuilders::Base.default_show_builder
-			builder = builder_class.new(object, self)
+			builder_class = options.delete(:builder) || ViewBuilders::Base.default_show_builder
+			builder = builder_class.new(object, self, options)
 			builder.show(&proc)
 		end
+
+		def crud_page_html(*args, &proc)
+			options = args.extract_options!
+
+			builder_class = options.delete(:builder) || ViewBuilders::Base.default_crud_page_builder
+			builder = builder_class.new(nil, self)
+			builder.crud_page(options, &proc)
+		end
+
 	end
 
 
@@ -97,18 +106,26 @@ module ViewBuilders
 			private
 
 			def render_list(content, options)
-				@template.content_tag(:ul, content, {:class => "list"}.merge(options))
+				render_content_tag_with_forced_class(:ul, 'list', content, options)
+				# @template.content_tag(:ul, content, {:class => "list"}.merge(options))
 			end
 
 			def render_row(content, options)
-				@template.content_tag(:li, content, {:class => "row"}.merge(options))
+				#@template.content_tag(:li, content, {:class => "row#{@template.cycle(' odd', '')}"}.merge(options))
+				render_content_tag_with_forced_class(:li, "row#{@template.cycle(' odd', '')}", content, options)
+			end
+
+			def render_header_row(content, options)
+				render_content_tag_with_forced_class(:li, 'row header', content, options)
 			end
 		end
 
 
 		class SimpleShowBuilder < GeneralBuilder
-			def initialize(object, template)
-				@object, @template = object, template
+			attr_reader :object
+
+			def initialize(object, template, options = {})
+				@object, @template, @options = object, template, options
 			end
 
 			def show(*args, &proc)
@@ -122,8 +139,8 @@ module ViewBuilders
 
 			def attribute(attr, options = {})
 				render_attribute(
-					options.delete(:name) || attribute_name_content(@object, attr, options),
-					options.delete(:value) || attribute_value_content(@object, attr, options),
+					attribute_name_content(@object, attr, options),
+					attribute_value_content(@object, attr, options),
 					options.merge(:attribute_name => attr.to_s)
 				)
 			end
@@ -141,7 +158,7 @@ module ViewBuilders
 
 			def render_attribute(name, value, options = {})
 				li_class = options.delete(:attribute_name)
-				content = render_attribute_name(name, options[:name_options] || {}) + render_attribute_value(value, options[:value_options] || {})
+				content = render_attribute_name(name, options.delete(:name_options) || {}) + render_attribute_value(value, options.delete(:value_options) || {})
 				render_content_tag_with_forced_class(:li, li_class, content, options)
 			end
 
@@ -154,36 +171,102 @@ module ViewBuilders
 			end
 
 			def attribute_name_content(object, attr, options = {})
-				object.class.human_attribute_name attr
+				options[:name] || object.class.human_attribute_name(attr)
 			end
 
 			def attribute_value_content(object, attr, options = {})
-				value = object.respond_to?(attr) ? object.send(attr) : nil
+				if (value = options[:value]).nil?
+					value = object.respond_to?(attr) ? object.send(attr) : nil
 
-				case value
-					when Date, Time, DateTime:
-						value = @template.l(value)
-					when FalseClass, TrueClass:
-						value = @template.t(value.to_s)
-					when NilClass:
-						value = @template.h("#{object.street} #{object.number}") if attr.to_sym == :address && object.respond_to?(:street) && object.respond_to?(:number)
-					when String:
-						value = @template.link_to(value, "mailto:#{value}") if attr.to_sym == :email
-					else
-						value = @template.number_to_currency(value) if attr.to_s.match(/price$/)
+					case value
+						when Date, Time, DateTime:
+							value = options[:date_format] ? @template.l(value, :format => options[:date_format]) : @template.l(value)
+						when FalseClass, TrueClass: 
+							value = @template.t(value.to_s)
+						when NilClass:
+							value = @template.h("#{object.street} #{object.number}") if attr.to_sym == :address && object.respond_to?(:street) && object.respond_to?(:number)
+						when String:
+							value = @template.link_to(value, "mailto:#{value}") if attr.to_sym == :email && value.present?
+						else
+							value = @template.number_to_currency(value) if attr.to_s.match(/price$/)
+					end
 				end
+
+				value = @options[:blank_text] if value.blank? && (@options || {})[:blank_text].present?
 
 				return value
 			end
 		end
 
+		class ExtraShowBuilder < SimpleShowBuilder
+			def from_until_attribute(attr, options = {})
+				render_attribute(
+					attribute_name_content(@object, attr, options),
+					[(attribute_value_content(@object, attr.to_s+"_from", options) || ''),
+					(attribute_value_content(@object, attr.to_s+"_until", options) || '')].reject(&:blank?).join(options.delete(:join_text) || " / "),
+					options.merge(:attribute_name => attr.to_s)
+				)
+			end
+			
+			def from_until_attributes(*args)
+				options = args.extract_options!
+				return args.map{|arg| self.from_until_attribute(arg, options)}.join
+			end
+		end
+
+		class SimpleCrudPageBuilder < GeneralBuilder
+			def initialize(object, template)
+				@object, @template = object, template
+			end
+
+			def crud_page(*args, &proc)
+				options = args.extract_options!
+				default_handler(:render_crud_page, *(args+[options.merge(:builder => self)]), &proc)
+			end
+
+			def title(content, options = {})
+				render_title content, options
+			end
+
+			def default_title
+			end
+
+			def links(*args, &proc)
+				default_handler(:render_links, *args, &proc)
+			end
+
+			def content(*args, &proc)
+				default_handler(:render_content, *args, &proc)
+			end
+
+			private
+
+			def render_crud_page(content, options)
+				options[:class] ||= 'crud_page'
+				@template.content_tag :div, content, options
+			end
+
+			def render_title(content, options)
+				@template.content_tag :h1, content, options
+			end
+
+			def render_links(content, options)
+				render_content_tag_with_forced_class(:div, 'links', content, options)
+			end
+
+			def render_content(content, options)
+				# nothing special here
+				return content
+			end
+		end
 
 	end
 
 	class Base
-		cattr_accessor :default_list_builder, :default_show_builder
+		cattr_accessor :default_list_builder, :default_show_builder, :default_crud_page_builder
 		self.default_list_builder = ::ViewBuilders::Builders::PuristListBuilder
 		self.default_show_builder = ::ViewBuilders::Builders::SimpleShowBuilder
+		self.default_crud_page_builder = ::ViewBuilders::Builders::SimpleCrudPageBuilder
 	end
 end
 
