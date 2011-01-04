@@ -94,6 +94,7 @@ module ViewBuilders
 					@current_column = (@current_column || -1) + 1
 					options = args.extract_options!
 					args << options.merge(:class => options[:class] || @column_classes[@current_column])
+					@current_column += (options[:colspan].to_i - 1) if options[:colspan].present?
 				end
 
 				default_handler(:render_header_column, *args, &proc)
@@ -104,6 +105,7 @@ module ViewBuilders
 					@current_column = (@current_column || -1) + 1
 					options = args.extract_options!
 					args << options.merge(:class => options[:class] || @column_classes[@current_column])
+					@current_column += (options[:colspan].to_i - 1) if options[:colspan].present?
 				end
 
 				default_handler(:render_column, *args, &proc)
