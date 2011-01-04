@@ -93,7 +93,7 @@ module ViewBuilders
 				if @column_classes.present?
 					@current_column = (@current_column || -1) + 1
 					options = args.extract_options!
-					args << options.merge(:class => [@column_classes[@current_column], options[:class]].reject(&:blank?).join(" "))
+					args << options.merge(:class => options[:class] || @column_classes[@current_column])
 				end
 
 				default_handler(:render_header_column, *args, &proc)
@@ -103,7 +103,7 @@ module ViewBuilders
 				if @column_classes.present?
 					@current_column = (@current_column || -1) + 1
 					options = args.extract_options!
-					args << options.merge(:class => [@column_classes[@current_column], options[:class]].reject(&:blank?).join(" "))
+					args << options.merge(:class => options[:class] || @column_classes[@current_column])
 				end
 
 				default_handler(:render_column, *args, &proc)
